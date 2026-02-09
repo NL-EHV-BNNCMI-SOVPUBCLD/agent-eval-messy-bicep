@@ -39,8 +39,8 @@ case $CHOICE in
     read -p "Enter resource group name [rg-drift-test-manual]: " RG_NAME
     RG_NAME=${RG_NAME:-rg-drift-test-manual}
     
-    read -p "Enter location [eastus]: " LOCATION
-    LOCATION=${LOCATION:-eastus}
+    read -p "Enter location [westeurope]: " LOCATION
+    LOCATION=${LOCATION:-westeurope}
     
     echo "📦 Creating resource group: $RG_NAME"
     az group create --name $RG_NAME --location $LOCATION

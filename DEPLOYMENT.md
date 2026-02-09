@@ -10,7 +10,7 @@ Create an Azure AD App Registration with federated credentials for GitHub Action
 
 ```bash
 # Create Resource Group for testing
-az group create --name rg-drift-test-shared --location eastus
+az group create --name rg-drift-test-shared --location westeurope
 
 # Create Service Principal with Contributor role
 az ad sp create-for-rbac \

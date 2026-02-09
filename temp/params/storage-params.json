@@ -3,10 +3,10 @@
   "contentVersion": "1.0.0.0",
   "parameters": {
     "storageAccountName": {
-      "value": "mystorageacct001"
+      "value": "bettystoragemessy001"
     },
     "location": {
-      "value": "eastus"
+      "value": "westeurope"
     },
     "sku": {
       "value": "Standard_GRS"
