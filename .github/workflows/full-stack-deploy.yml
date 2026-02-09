@@ -1,0 +1,133 @@
+name: Full Stack Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      resource_group_prefix:
+        description: 'Resource Group Prefix'
+        required: true
+        default: 'rg-drift-test'
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-core:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    outputs:
+      resource_group: ${{ steps.setup.outputs.resource_group }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Variables
+        id: setup
+        run: |
+          RG_NAME="${{ inputs.resource_group_prefix }}-${{ inputs.environment }}-${{ github.run_number }}"
+          echo "resource_group=$RG_NAME" >> $GITHUB_OUTPUT
+          echo "Resource Group: $RG_NAME"
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create Resource Group
+        run: |
+          az group create \
+            --name ${{ steps.setup.outputs.resource_group }} \
+            --location eastus \
+            --tags Environment=${{ inputs.environment }} ManagedBy=GitHub RunNumber=${{ github.run_number }}
+
+      - name: Deploy Storage
+        run: |
+          az deployment group create \
+            --resource-group ${{ steps.setup.outputs.resource_group }} \
+            --template-file storage.bicep \
+            --parameters temp/params/storage-params.json \
+            --name storage-${{ github.run_number }}
+
+      - name: Deploy NSG
+        run: |
+          az deployment group create \
+            --resource-group ${{ steps.setup.outputs.resource_group }} \
+            --parameters configs/nsg-config.bicepparam \
+            --name nsg-${{ github.run_number }}
+
+      - name: Deploy VNet
+        run: |
+          az deployment group create \
+            --resource-group ${{ steps.setup.outputs.resource_group }} \
+            --template-file old_stuff/network/vnet.bicep \
+            --parameters parameters.json \
+            --name vnet-${{ github.run_number }}
+
+  deploy-apps:
+    runs-on: ubuntu-latest
+    needs: deploy-core
+    environment: ${{ inputs.environment }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Container Registry
+        run: |
+          az deployment group create \
+            --resource-group ${{ needs.deploy-core.outputs.resource_group }} \
+            --parameters p/acr-prod.bicepparam \
+            --name acr-${{ github.run_number }}
+
+      - name: Deploy Web App
+        run: |
+          az deployment group create \
+            --resource-group ${{ needs.deploy-core.outputs.resource_group }} \
+            --parameters webapp/dev-params.bicepparam \
+            --name webapp-${{ github.run_number }}
+
+      - name: Deploy Key Vault
+        run: |
+          az deployment group create \
+            --resource-group ${{ needs.deploy-core.outputs.resource_group }} \
+            --parameters random/stuff/kv.bicepparam \
+            --name kv-${{ github.run_number }}
+
+  summary:
+    runs-on: ubuntu-latest
+    needs: [deploy-core, deploy-apps]
+    if: always()
+    
+    steps:
+      - name: Deployment Summary
+        run: |
+          echo "### Full Stack Deployment Summary :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Core Infrastructure | ${{ needs.deploy-core.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Applications | ${{ needs.deploy-apps.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Resource Group:** ${{ needs.deploy-core.outputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY

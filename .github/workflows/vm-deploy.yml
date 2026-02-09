@@ -1,0 +1,49 @@
+name: VM Deployment (Staging)
+
+on:
+  workflow_dispatch:
+    inputs:
+      resource_group:
+        description: 'Resource Group Name'
+        required: true
+        type: string
+      nic_id:
+        description: 'Network Interface Resource ID'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-vm:
+    runs-on: ubuntu-latest
+    environment: staging
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Deploy VM using module from weird folder name with JSON params
+      - name: Deploy Virtual Machine
+        run: |
+          az deployment group create \
+            --resource-group ${{ inputs.resource_group }} \
+            --template-file modules/vm_thing.bicep \
+            --parameters deploy/staging/vm.parameters.json \
+            --parameters nicId=${{ inputs.nic_id }} \
+            --name vm-deployment-${{ github.run_number }}
+
+      - name: Deployment Summary
+        run: |
+          echo "### VM Deployment Complete :computer:" >> $GITHUB_STEP_SUMMARY
+          echo "- Resource Group: ${{ inputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
+          echo "- VM Name: vm-staging-01" >> $GITHUB_STEP_SUMMARY

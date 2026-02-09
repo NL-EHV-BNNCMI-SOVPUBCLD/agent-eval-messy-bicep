@@ -1,0 +1,56 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "bashdb",
+      "request": "launch",
+      "name": "Debug setup-azure-auth.sh",
+      "cwd": "${workspaceFolder}",
+      "program": "${workspaceFolder}/scripts/setup-azure-auth.sh",
+      "args": [],
+      "pathBash": "/bin/bash",
+      "pathBashdb": "${env:HOME}/.vscode/extensions/rogalmic.bash-debug-0.3.9/bashdb_dir/bashdb",
+      "pathBashdbLib": "${env:HOME}/.vscode/extensions/rogalmic.bash-debug-0.3.9/bashdb_dir",
+      "pathCat": "/bin/cat",
+      "pathMkfifo": "/usr/bin/mkfifo",
+      "pathPkill": "/usr/bin/pkill",
+      "showDebugOutput": true,
+      "trace": true,
+      "terminalKind": "integrated"
+    },
+    {
+      "type": "bashdb",
+      "request": "launch",
+      "name": "Debug drift-testing.sh",
+      "cwd": "${workspaceFolder}",
+      "program": "${workspaceFolder}/scripts/drift-testing.sh",
+      "args": [],
+      "pathBash": "/bin/bash",
+      "pathBashdb": "${env:HOME}/.vscode/extensions/rogalmic.bash-debug-0.3.9/bashdb_dir/bashdb",
+      "pathBashdbLib": "${env:HOME}/.vscode/extensions/rogalmic.bash-debug-0.3.9/bashdb_dir",
+      "pathCat": "/bin/cat",
+      "pathMkfifo": "/usr/bin/mkfifo",
+      "pathPkill": "/usr/bin/pkill",
+      "showDebugOutput": true,
+      "trace": true,
+      "terminalKind": "integrated"
+    },
+    {
+      "type": "bashdb",
+      "request": "launch",
+      "name": "Debug Current Bash Script",
+      "cwd": "${workspaceFolder}",
+      "program": "${file}",
+      "args": [],
+      "pathBash": "/bin/bash",
+      "pathBashdb": "${env:HOME}/.vscode/extensions/rogalmic.bash-debug-0.3.9/bashdb_dir/bashdb",
+      "pathBashdbLib": "${env:HOME}/.vscode/extensions/rogalmic.bash-debug-0.3.9/bashdb_dir",
+      "pathCat": "/bin/cat",
+      "pathMkfifo": "/usr/bin/mkfifo",
+      "pathPkill": "/usr/bin/pkill",
+      "showDebugOutput": true,
+      "trace": true,
+      "terminalKind": "integrated"
+    }
+  ]
+}

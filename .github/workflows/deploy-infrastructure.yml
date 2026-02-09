@@ -1,0 +1,85 @@
+name: Deploy Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      resource_group:
+        description: 'Resource Group Name'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-core-infra:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create Resource Group
+        run: |
+          az group create \
+            --name ${{ inputs.resource_group }} \
+            --location eastus
+
+      # Deploy VNet using legacy JSON params
+      - name: Deploy Virtual Network
+        run: |
+          az deployment group create \
+            --resource-group ${{ inputs.resource_group }} \
+            --template-file old_stuff/network/vnet.bicep \
+            --parameters parameters.json \
+            --name vnet-deployment-${{ github.run_number }}
+
+      # Deploy NSG using bicepparam
+      - name: Deploy Network Security Group
+        run: |
+          az deployment group create \
+            --resource-group ${{ inputs.resource_group }} \
+            --parameters configs/nsg-config.bicepparam \
+            --name nsg-deployment-${{ github.run_number }}
+
+      # Deploy Storage using JSON params from temp folder
+      - name: Deploy Storage Account
+        run: |
+          az deployment group create \
+            --resource-group ${{ inputs.resource_group }} \
+            --template-file storage.bicep \
+            --parameters temp/params/storage-params.json \
+            --name storage-deployment-${{ github.run_number }}
+
+      # Deploy KeyVault using bicepparam
+      - name: Deploy Key Vault
+        run: |
+          az deployment group create \
+            --resource-group ${{ inputs.resource_group }} \
+            --parameters random/stuff/kv.bicepparam \
+            --name keyvault-deployment-${{ github.run_number }}
+
+      - name: Deployment Summary
+        run: |
+          echo "### Infrastructure Deployment Complete :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "- Resource Group: ${{ inputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Environment: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run Number: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY

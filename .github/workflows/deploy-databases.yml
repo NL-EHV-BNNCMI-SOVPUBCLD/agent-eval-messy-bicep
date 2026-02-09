@@ -1,0 +1,75 @@
+name: Deploy Databases
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      resource_group:
+        description: 'Resource Group Name'
+        required: true
+        type: string
+      deploy_cosmos:
+        description: 'Deploy Cosmos DB'
+        required: false
+        default: false
+        type: boolean
+      deploy_sql:
+        description: 'Deploy SQL Database'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-databases:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Deploy Cosmos DB from backup/old folder using test params
+      - name: Deploy Cosmos DB
+        if: ${{ inputs.deploy_cosmos }}
+        run: |
+          az deployment group create \
+            --resource-group ${{ inputs.resource_group }} \
+            --template-file backup/old/cosmos.bicep \
+            --parameters test/cosmos-test.json \
+            --name cosmos-deployment-${{ github.run_number }}
+
+      # Deploy SQL Database from misc folder using PROD params
+      - name: Deploy SQL Database
+        if: ${{ inputs.deploy_sql }}
+        run: |
+          az deployment group create \
+            --resource-group ${{ inputs.resource_group }} \
+            --template-file misc/database/sqldb.bicep \
+            --parameters PROD_PARAMS/sql.parameters.json \
+            --name sql-deployment-${{ github.run_number }}
+
+      - name: Deployment Summary
+        run: |
+          echo "### Database Deployment Complete :database:" >> $GITHUB_STEP_SUMMARY
+          echo "- Resource Group: ${{ inputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Cosmos DB: ${{ inputs.deploy_cosmos }}" >> $GITHUB_STEP_SUMMARY
+          echo "- SQL Database: ${{ inputs.deploy_sql }}" >> $GITHUB_STEP_SUMMARY
