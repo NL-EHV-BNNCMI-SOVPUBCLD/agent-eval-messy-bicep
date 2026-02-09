@@ -1,10 +1,9 @@
+# this was created with help of copilot which should be obvious with all the inline scripts. this is just test. nothing imporatnt here
+# and we made this a mess on purpose to test drift detection.
 name: Drift Detection
 
 on:
   workflow_dispatch:
-  schedule:
-    # Run daily at 6 AM UTC
-    - cron: '0 6 * * *'
 
 permissions:
   id-token: write
@@ -17,35 +16,10 @@ env:
 jobs:
   detect-drift:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Storage Account
-            template: storage.bicep
-            parameters: temp/params/storage-params.json
-          - name: Network Security Group
-            template: configs/nsg-config.bicepparam
-            parameters: ""
-          - name: Key Vault
-            template: random/stuff/kv.bicepparam
-            parameters: ""
-          - name: Virtual Network
-            template: old_stuff/network/vnet.bicep
-            parameters: parameters.json
-          - name: Container Registry
-            template: ContainerRegistry.bicep
-            parameters: p/acr-prod.bicepparam
-          - name: Web App
-            template: webapp/app.bicep
-            parameters: webapp/dev-params.bicepparam
-    
-    outputs:
-      drift-detected: ${{ steps.drift-check.outputs.has-drift }}
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v2
       
       - name: Azure Login
         uses: azure/login@v2
@@ -54,73 +28,109 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       
-      - name: Run DriftGuard - ${{ matrix.name }}
+      - name: Pull DriftGuard Docker image
+        run: docker pull mwhooo/driftguard:latest
+      
+      - name: Run drift detection on all resources
         id: drift-check
         continue-on-error: true
         run: |
-          echo "🔍 Checking drift for: ${{ matrix.name }}"
-          echo "   Template: ${{ matrix.template }}"
+          set +e  # Don't exit on error
           
           # Copy Azure credentials for container
           mkdir -p $HOME/.azure-container
           cp -r $HOME/.azure/* $HOME/.azure-container/
           
-          # Build DriftGuard command with JSON output
-          DRIFT_CMD="docker run --rm \
-            -v $HOME/.azure-container:/root/.azure \
-            -v $(pwd):/workspace \
-            mwhooo/driftguard:latest \
-            --bicep-file /workspace/${{ matrix.template }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --output Json"
+          # Create reports directory
+          mkdir -p drift-reports
           
-          # Add parameters file if specified
-          if [ -n "${{ matrix.parameters }}" ]; then
-            DRIFT_CMD="$DRIFT_CMD --parameters-file /workspace/${{ matrix.parameters }}"
-          fi
+          DRIFT_DETECTED=0
           
-          # Run drift detection and capture JSON output
-          echo "Running: $DRIFT_CMD"
-          $DRIFT_CMD > drift-output.json 2>&1 || true
+          # Define resources to check
+          declare -a RESOURCES=(
+            "Storage Account|storage.bicep|temp/params/storage-params.json"
+            "Network Security Group|configs/nsg-config.bicepparam|"
+            "Key Vault|random/stuff/kv.bicepparam|"
+            "Virtual Network|old_stuff/network/vnet.bicep|parameters.json"
+            "Container Registry|ContainerRegistry.bicep|p/acr-prod.bicepparam"
+            "Web App|webapp/app.bicep|webapp/dev-params.bicepparam"
+          )
           
-          # Also capture console output for logging
-          docker run --rm \
-            -v $HOME/.azure-container:/root/.azure \
-            -v $(pwd):/workspace \
-            mwhooo/driftguard:latest \
-            --bicep-file /workspace/${{ matrix.template }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --output Console \
-            $([ -n "${{ matrix.parameters }}" ] && echo "--parameters-file /workspace/${{ matrix.parameters }}") \
-            > drift-console.txt 2>&1 || true
-          
-          # Check if drift was detected from JSON
-          if [ -f drift-output.json ]; then
-            DRIFT_COUNT=$(jq -r '.driftSummary.totalResourcesWithDrift // 0' drift-output.json 2>/dev/null || echo "0")
-            echo "drift-count=$DRIFT_COUNT" >> $GITHUB_OUTPUT
+          # Check each resource sequentially
+          for resource in "${RESOURCES[@]}"; do
+            IFS='|' read -r name template params <<< "$resource"
             
-            if [ "$DRIFT_COUNT" -gt 0 ]; then
-              echo "has-drift=true" >> $GITHUB_OUTPUT
-              echo "❌ Drift detected for ${{ matrix.name }}: $DRIFT_COUNT resource(s)"
-              exit 1
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🔍 Checking: $name"
+            echo "   Template: $template"
+            [ -n "$params" ] && echo "   Parameters: $params"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            
+            # Sanitize filename
+            SAFE_NAME=$(echo "$name" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
+            
+            # Build Docker command
+            DRIFT_CMD="docker run --rm \
+              -v $HOME/.azure-container:/root/.azure \
+              -v $(pwd):/workspace \
+              mwhooo/driftguard:latest \
+              --bicep-file /workspace/$template \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --output Json"
+            
+            # Add parameters if specified
+            [ -n "$params" ] && DRIFT_CMD="$DRIFT_CMD --parameters-file /workspace/$params"
+            
+            # Run and capture JSON
+            $DRIFT_CMD > "drift-reports/${SAFE_NAME}.json" 2>&1 || true
+            
+            # Also get console output
+            docker run --rm \
+              -v $HOME/.azure-container:/root/.azure \
+              -v $(pwd):/workspace \
+              mwhooo/driftguard:latest \
+              --bicep-file /workspace/$template \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --output Console \
+              $([ -n "$params" ] && echo "--parameters-file /workspace/$params") \
+              > "drift-reports/${SAFE_NAME}.txt" 2>&1 || true
+            
+            # Check drift
+            if [ -f "drift-reports/${SAFE_NAME}.json" ]; then
+              DRIFT_COUNT=$(jq -r '.driftSummary.totalResourcesWithDrift // 0' "drift-reports/${SAFE_NAME}.json" 2>/dev/null || echo "0")
+              
+              if [ "$DRIFT_COUNT" -gt 0 ]; then
+                echo "❌ Drift detected: $DRIFT_COUNT resource(s)"
+                DRIFT_DETECTED=1
+              else
+                echo "✅ No drift detected"
+              fi
             else
-              echo "has-drift=false" >> $GITHUB_OUTPUT
-              echo "✅ No drift for ${{ matrix.name }}"
+              echo "⚠️ Could not analyze drift"
             fi
-          else
-            echo "⚠️ Could not parse drift results"
-            cat drift-output.json
+            
+            # Small delay between checks to avoid rate limits
+            sleep 2
+          done
+          
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "drift-detected=$DRIFT_DETECTED" >> $GITHUB_OUTPUT
+          
+          if [ "$DRIFT_DETECTED" -eq 1 ]; then
+            echo "❌ Configuration drift detected!"
             exit 1
+          else
+            echo "✅ All resources in sync"
           fi
       
-      - name: Upload drift report
+      - name: Upload drift reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: drift-report-${{ matrix.name }}
-          path: |
-            drift-output.json
-            drift-console.txt
+          name: drift-reports
+          path: drift-reports/
           retention-days: 30
 
   create-issue:
@@ -131,9 +141,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Download all drift reports
+      - name: Download drift reports
         uses: actions/download-artifact@v4
         with:
+          name: drift-reports
           path: drift-reports
       
       - name: Combine drift reports
@@ -148,25 +159,26 @@ jobs:
           echo "### 📊 Drift Summary" >> issue-body.md
           echo "" >> issue-body.md
           
-          # Process each drift report
-          for report_dir in drift-reports/drift-report-*; do
-            if [ -d "$report_dir" ] && [ -f "$report_dir/drift-output.json" ]; then
-              resource_name=$(basename "$report_dir" | sed 's/drift-report-//')
+          # Process each drift report JSON file
+          for json_file in drift-reports/*.json; do
+            if [ -f "$json_file" ]; then
+              resource_name=$(basename "$json_file" .json | tr '-' ' ' | sed 's/\b\(.\)/\u\1/g')
+              txt_file="${json_file%.json}.txt"
               
               # Parse JSON for summary
-              TOTAL_DRIFT=$(jq -r '.driftSummary.totalResourcesWithDrift // 0' "$report_dir/drift-output.json")
+              TOTAL_DRIFT=$(jq -r '.driftSummary.totalResourcesWithDrift // 0' "$json_file" 2>/dev/null || echo "0")
               
               if [ "$TOTAL_DRIFT" -gt 0 ]; then
                 echo "#### ⚠️ $resource_name" >> issue-body.md
                 echo "" >> issue-body.md
                 
                 # Extract summary from JSON
-                jq -r '.driftSummary | "- **Total Resources with Drift:** \(.totalResourcesWithDrift // 0)\n- **Total Resources Analyzed:** \(.totalResourcesAnalyzed // 0)\n- **Detection Time:** \(.detectionTimestamp // "N/A")"' "$report_dir/drift-output.json" >> issue-body.md 2>/dev/null || echo "- Could not parse summary" >> issue-body.md
+                jq -r '.driftSummary | "- **Total Resources with Drift:** \(.totalResourcesWithDrift // 0)\n- **Total Resources Analyzed:** \(.totalResourcesAnalyzed // 0)\n- **Detection Time:** \(.detectionTimestamp // "N/A")"' "$json_file" >> issue-body.md 2>/dev/null || echo "- Could not parse summary" >> issue-body.md
                 echo "" >> issue-body.md
                 
                 # List drifted resources
                 echo "**Drifted Resources:**" >> issue-body.md
-                jq -r '.driftedResources[]? | "- `\(.resourceType)` **\(.resourceName)**\n  - Properties changed: \(.driftedProperties | length)"' "$report_dir/drift-output.json" >> issue-body.md 2>/dev/null || true
+                jq -r '.driftedResources[]? | "- `\(.resourceType)` **\(.resourceName)**\n  - Properties changed: \(.driftedProperties | length)"' "$json_file" >> issue-body.md 2>/dev/null || true
                 echo "" >> issue-body.md
                 
                 # Add detailed drift information
@@ -174,18 +186,18 @@ jobs:
                 echo "<summary>📋 Detailed Drift Analysis (Click to expand)</summary>" >> issue-body.md
                 echo "" >> issue-body.md
                 echo '```json' >> issue-body.md
-                jq '.' "$report_dir/drift-output.json" 2>/dev/null || cat "$report_dir/drift-output.json" >> issue-body.md
+                jq '.' "$json_file" 2>/dev/null || cat "$json_file"
                 echo '```' >> issue-body.md
                 echo "</details>" >> issue-body.md
                 echo "" >> issue-body.md
                 
-                # Add console output
-                if [ -f "$report_dir/drift-console.txt" ]; then
+                # Add console output if exists
+                if [ -f "$txt_file" ]; then
                   echo "<details>" >> issue-body.md
                   echo "<summary>📝 Console Output (Click to expand)</summary>" >> issue-body.md
                   echo "" >> issue-body.md
                   echo '```' >> issue-body.md
-                  head -200 "$report_dir/drift-console.txt" >> issue-body.md
+                  head -200 "$txt_file" >> issue-body.md
                   echo '```' >> issue-body.md
                   echo "</details>" >> issue-body.md
                   echo "" >> issue-body.md
