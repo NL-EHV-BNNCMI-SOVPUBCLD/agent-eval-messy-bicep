@@ -2,20 +2,6 @@ name: Deploy Infrastructure
 
 on:
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to deploy'
-        required: true
-        default: 'dev'
-        type: choice
-        options:
-          - dev
-          - staging
-          - prod
-      resource_group:
-        description: 'Resource Group Name'
-        required: true
-        type: string
 
 permissions:
   id-token: write
@@ -24,7 +10,6 @@ permissions:
 jobs:
   deploy-core-infra:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
     
     steps:
       - name: Checkout
@@ -37,17 +22,11 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Create Resource Group
-        run: |
-          az group create \
-            --name ${{ inputs.resource_group }} \
-            --location eastus
-
       # Deploy VNet using legacy JSON params
       - name: Deploy Virtual Network
         run: |
           az deployment group create \
-            --resource-group ${{ inputs.resource_group }} \
+            --resource-group rg-messydrift-test \
             --template-file old_stuff/network/vnet.bicep \
             --parameters parameters.json \
             --name vnet-deployment-${{ github.run_number }}
@@ -56,7 +35,7 @@ jobs:
       - name: Deploy Network Security Group
         run: |
           az deployment group create \
-            --resource-group ${{ inputs.resource_group }} \
+            --resource-group rg-messydrift-test \
             --parameters configs/nsg-config.bicepparam \
             --name nsg-deployment-${{ github.run_number }}
 
@@ -64,7 +43,7 @@ jobs:
       - name: Deploy Storage Account
         run: |
           az deployment group create \
-            --resource-group ${{ inputs.resource_group }} \
+            --resource-group rg-messydrift-test \
             --template-file storage.bicep \
             --parameters temp/params/storage-params.json \
             --name storage-deployment-${{ github.run_number }}
@@ -73,13 +52,12 @@ jobs:
       - name: Deploy Key Vault
         run: |
           az deployment group create \
-            --resource-group ${{ inputs.resource_group }} \
+            --resource-group rg-messydrift-test \
             --parameters random/stuff/kv.bicepparam \
             --name keyvault-deployment-${{ github.run_number }}
 
       - name: Deployment Summary
         run: |
           echo "### Infrastructure Deployment Complete :rocket:" >> $GITHUB_STEP_SUMMARY
-          echo "- Resource Group: ${{ inputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Environment: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Resource Group: rg-messydrift-test" >> $GITHUB_STEP_SUMMARY
           echo "- Run Number: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY

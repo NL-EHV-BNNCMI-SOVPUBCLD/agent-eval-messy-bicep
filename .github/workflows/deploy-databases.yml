@@ -3,19 +3,6 @@ name: Deploy Databases
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: 'Environment to deploy'
-        required: true
-        default: 'dev'
-        type: choice
-        options:
-          - dev
-          - staging
-          - prod
-      resource_group:
-        description: 'Resource Group Name'
-        required: true
-        type: string
       deploy_cosmos:
         description: 'Deploy Cosmos DB'
         required: false
@@ -34,7 +21,6 @@ permissions:
 jobs:
   deploy-databases:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
     
     steps:
       - name: Checkout
@@ -52,7 +38,7 @@ jobs:
         if: ${{ inputs.deploy_cosmos }}
         run: |
           az deployment group create \
-            --resource-group ${{ inputs.resource_group }} \
+            --resource-group rg-messydrift-test \
             --template-file backup/old/cosmos.bicep \
             --parameters test/cosmos-test.json \
             --name cosmos-deployment-${{ github.run_number }}
@@ -62,7 +48,7 @@ jobs:
         if: ${{ inputs.deploy_sql }}
         run: |
           az deployment group create \
-            --resource-group ${{ inputs.resource_group }} \
+            --resource-group rg-messydrift-test \
             --template-file misc/database/sqldb.bicep \
             --parameters PROD_PARAMS/sql.parameters.json \
             --name sql-deployment-${{ github.run_number }}
@@ -70,6 +56,6 @@ jobs:
       - name: Deployment Summary
         run: |
           echo "### Database Deployment Complete :database:" >> $GITHUB_STEP_SUMMARY
-          echo "- Resource Group: ${{ inputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Resource Group: rg-messydrift-test" >> $GITHUB_STEP_SUMMARY
           echo "- Cosmos DB: ${{ inputs.deploy_cosmos }}" >> $GITHUB_STEP_SUMMARY
           echo "- SQL Database: ${{ inputs.deploy_sql }}" >> $GITHUB_STEP_SUMMARY

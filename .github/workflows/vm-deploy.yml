@@ -3,10 +3,6 @@ name: VM Deployment (Staging)
 on:
   workflow_dispatch:
     inputs:
-      resource_group:
-        description: 'Resource Group Name'
-        required: true
-        type: string
       nic_id:
         description: 'Network Interface Resource ID'
         required: true
@@ -19,7 +15,6 @@ permissions:
 jobs:
   deploy-vm:
     runs-on: ubuntu-latest
-    environment: staging
     
     steps:
       - name: Checkout
@@ -36,7 +31,7 @@ jobs:
       - name: Deploy Virtual Machine
         run: |
           az deployment group create \
-            --resource-group ${{ inputs.resource_group }} \
+            --resource-group rg-messydrift-test \
             --template-file modules/vm_thing.bicep \
             --parameters deploy/staging/vm.parameters.json \
             --parameters nicId=${{ inputs.nic_id }} \
@@ -45,5 +40,5 @@ jobs:
       - name: Deployment Summary
         run: |
           echo "### VM Deployment Complete :computer:" >> $GITHUB_STEP_SUMMARY
-          echo "- Resource Group: ${{ inputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Resource Group: rg-messydrift-test" >> $GITHUB_STEP_SUMMARY
           echo "- VM Name: vm-staging-01" >> $GITHUB_STEP_SUMMARY

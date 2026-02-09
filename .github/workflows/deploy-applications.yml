@@ -3,21 +3,8 @@ name: Deploy Applications
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: 'Environment to deploy'
-        required: true
-        default: 'dev'
-        type: choice
-        options:
-          - dev
-          - staging
-          - prod
-      resource_group:
-        description: 'Resource Group Name'
-        required: true
-        type: string
       log_analytics_workspace_id:
-        description: 'Log Analytics Workspace Resource ID'
+        description: 'Log Analytics Workspace Resource ID (optional for App Insights)'
         required: false
         type: string
 
@@ -28,7 +15,6 @@ permissions:
 jobs:
   deploy-app-services:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
     
     steps:
       - name: Checkout
@@ -45,7 +31,7 @@ jobs:
       - name: Deploy Azure Container Registry
         run: |
           az deployment group create \
-            --resource-group ${{ inputs.resource_group }} \
+            --resource-group rg-messydrift-test \
             --parameters p/acr-prod.bicepparam \
             --name acr-deployment-${{ github.run_number }}
 
@@ -53,7 +39,7 @@ jobs:
       - name: Deploy Web Application
         run: |
           az deployment group create \
-            --resource-group ${{ inputs.resource_group }} \
+            --resource-group rg-messydrift-test \
             --parameters webapp/dev-params.bicepparam \
             --name webapp-deployment-${{ github.run_number }}
 
@@ -62,7 +48,7 @@ jobs:
         if: ${{ inputs.log_analytics_workspace_id != '' }}
         run: |
           az deployment group create \
-            --resource-group ${{ inputs.resource_group }} \
+            --resource-group rg-messydrift-test \
             --template-file randomfolder/appinsights.bicep \
             --parameters a/b/c/insights-params.json \
             --parameters workspaceId=${{ inputs.log_analytics_workspace_id }} \
@@ -72,7 +58,7 @@ jobs:
         id: webapp
         run: |
           WEBAPP_URL=$(az deployment group show \
-            --resource-group ${{ inputs.resource_group }} \
+            --resource-group rg-messydrift-test \
             --name webapp-deployment-${{ github.run_number }} \
             --query properties.outputs.webAppUrl.value -o tsv)
           echo "url=$WEBAPP_URL" >> $GITHUB_OUTPUT
@@ -80,5 +66,5 @@ jobs:
       - name: Deployment Summary
         run: |
           echo "### Application Deployment Complete :tada:" >> $GITHUB_STEP_SUMMARY
-          echo "- Resource Group: ${{ inputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Resource Group: rg-messydrift-test" >> $GITHUB_STEP_SUMMARY
           echo "- Web App URL: https://${{ steps.webapp.outputs.url }}" >> $GITHUB_STEP_SUMMARY
