@@ -1,0 +1,251 @@
+name: Drift Detection
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run daily at 6 AM UTC
+    - cron: '0 6 * * *'
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+
+env:
+  RESOURCE_GROUP: rg-messydrift-test
+
+jobs:
+  detect-drift:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Storage Account
+            template: storage.bicep
+            parameters: temp/params/storage-params.json
+          - name: Network Security Group
+            template: configs/nsg-config.bicepparam
+            parameters: ""
+          - name: Key Vault
+            template: random/stuff/kv.bicepparam
+            parameters: ""
+          - name: Virtual Network
+            template: old_stuff/network/vnet.bicep
+            parameters: parameters.json
+          - name: Container Registry
+            template: ContainerRegistry.bicep
+            parameters: p/acr-prod.bicepparam
+          - name: Web App
+            template: webapp/app.bicep
+            parameters: webapp/dev-params.bicepparam
+    
+    outputs:
+      drift-detected: ${{ steps.drift-check.outputs.has-drift }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Run DriftGuard - ${{ matrix.name }}
+        id: drift-check
+        continue-on-error: true
+        run: |
+          echo "🔍 Checking drift for: ${{ matrix.name }}"
+          echo "   Template: ${{ matrix.template }}"
+          
+          # Copy Azure credentials for container
+          mkdir -p $HOME/.azure-container
+          cp -r $HOME/.azure/* $HOME/.azure-container/
+          
+          # Build DriftGuard command with JSON output
+          DRIFT_CMD="docker run --rm \
+            -v $HOME/.azure-container:/root/.azure \
+            -v $(pwd):/workspace \
+            mwhooo/driftguard:latest \
+            --bicep-file /workspace/${{ matrix.template }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --output Json"
+          
+          # Add parameters file if specified
+          if [ -n "${{ matrix.parameters }}" ]; then
+            DRIFT_CMD="$DRIFT_CMD --parameters-file /workspace/${{ matrix.parameters }}"
+          fi
+          
+          # Run drift detection and capture JSON output
+          echo "Running: $DRIFT_CMD"
+          $DRIFT_CMD > drift-output.json 2>&1 || true
+          
+          # Also capture console output for logging
+          docker run --rm \
+            -v $HOME/.azure-container:/root/.azure \
+            -v $(pwd):/workspace \
+            mwhooo/driftguard:latest \
+            --bicep-file /workspace/${{ matrix.template }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --output Console \
+            $([ -n "${{ matrix.parameters }}" ] && echo "--parameters-file /workspace/${{ matrix.parameters }}") \
+            > drift-console.txt 2>&1 || true
+          
+          # Check if drift was detected from JSON
+          if [ -f drift-output.json ]; then
+            DRIFT_COUNT=$(jq -r '.driftSummary.totalResourcesWithDrift // 0' drift-output.json 2>/dev/null || echo "0")
+            echo "drift-count=$DRIFT_COUNT" >> $GITHUB_OUTPUT
+            
+            if [ "$DRIFT_COUNT" -gt 0 ]; then
+              echo "has-drift=true" >> $GITHUB_OUTPUT
+              echo "❌ Drift detected for ${{ matrix.name }}: $DRIFT_COUNT resource(s)"
+              exit 1
+            else
+              echo "has-drift=false" >> $GITHUB_OUTPUT
+              echo "✅ No drift for ${{ matrix.name }}"
+            fi
+          else
+            echo "⚠️ Could not parse drift results"
+            cat drift-output.json
+            exit 1
+          fi
+      
+      - name: Upload drift report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-report-${{ matrix.name }}
+          path: |
+            drift-output.json
+            drift-console.txt
+          retention-days: 30
+
+  create-issue:
+    runs-on: ubuntu-latest
+    needs: detect-drift
+    if: failure()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download all drift reports
+        uses: actions/download-artifact@v4
+        with:
+          path: drift-reports
+      
+      - name: Combine drift reports
+        id: combine-reports
+        run: |
+          echo "## 🚨 Configuration Drift Detected" > issue-body.md
+          echo "" >> issue-body.md
+          echo "**Detection Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> issue-body.md
+          echo "**Resource Group:** ${{ env.RESOURCE_GROUP }}" >> issue-body.md
+          echo "**Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> issue-body.md
+          echo "" >> issue-body.md
+          echo "### 📊 Drift Summary" >> issue-body.md
+          echo "" >> issue-body.md
+          
+          # Process each drift report
+          for report_dir in drift-reports/drift-report-*; do
+            if [ -d "$report_dir" ] && [ -f "$report_dir/drift-output.json" ]; then
+              resource_name=$(basename "$report_dir" | sed 's/drift-report-//')
+              
+              # Parse JSON for summary
+              TOTAL_DRIFT=$(jq -r '.driftSummary.totalResourcesWithDrift // 0' "$report_dir/drift-output.json")
+              
+              if [ "$TOTAL_DRIFT" -gt 0 ]; then
+                echo "#### ⚠️ $resource_name" >> issue-body.md
+                echo "" >> issue-body.md
+                
+                # Extract summary from JSON
+                jq -r '.driftSummary | "- **Total Resources with Drift:** \(.totalResourcesWithDrift // 0)\n- **Total Resources Analyzed:** \(.totalResourcesAnalyzed // 0)\n- **Detection Time:** \(.detectionTimestamp // "N/A")"' "$report_dir/drift-output.json" >> issue-body.md 2>/dev/null || echo "- Could not parse summary" >> issue-body.md
+                echo "" >> issue-body.md
+                
+                # List drifted resources
+                echo "**Drifted Resources:**" >> issue-body.md
+                jq -r '.driftedResources[]? | "- `\(.resourceType)` **\(.resourceName)**\n  - Properties changed: \(.driftedProperties | length)"' "$report_dir/drift-output.json" >> issue-body.md 2>/dev/null || true
+                echo "" >> issue-body.md
+                
+                # Add detailed drift information
+                echo "<details>" >> issue-body.md
+                echo "<summary>📋 Detailed Drift Analysis (Click to expand)</summary>" >> issue-body.md
+                echo "" >> issue-body.md
+                echo '```json' >> issue-body.md
+                jq '.' "$report_dir/drift-output.json" 2>/dev/null || cat "$report_dir/drift-output.json" >> issue-body.md
+                echo '```' >> issue-body.md
+                echo "</details>" >> issue-body.md
+                echo "" >> issue-body.md
+                
+                # Add console output
+                if [ -f "$report_dir/drift-console.txt" ]; then
+                  echo "<details>" >> issue-body.md
+                  echo "<summary>📝 Console Output (Click to expand)</summary>" >> issue-body.md
+                  echo "" >> issue-body.md
+                  echo '```' >> issue-body.md
+                  head -200 "$report_dir/drift-console.txt" >> issue-body.md
+                  echo '```' >> issue-body.md
+                  echo "</details>" >> issue-body.md
+                  echo "" >> issue-body.md
+                fi
+              fi
+            fi
+          done
+          
+          echo "### 🔧 Remediation Steps" >> issue-body.md
+          echo "" >> issue-body.md
+          echo "1. Review the drift details above" >> issue-body.md
+          echo "2. Determine if changes are intentional or unauthorized" >> issue-body.md
+          echo "3. Update Bicep templates if changes should be permanent" >> issue-body.md
+          echo "4. OR re-deploy to restore expected configuration:" >> issue-body.md
+          echo '   ```bash' >> issue-body.md
+          echo '   gh workflow run full-stack-deploy.yml' >> issue-body.md
+          echo '   ```' >> issue-body.md
+          echo "5. Close this issue once drift is resolved" >> issue-body.md
+          echo "" >> issue-body.md
+          echo "### 📦 Artifacts" >> issue-body.md
+          echo "" >> issue-body.md
+          echo "Full JSON reports available in workflow artifacts:" >> issue-body.md
+          echo "- [Download All Drift Reports](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> issue-body.md
+          echo "" >> issue-body.md
+          echo "---" >> issue-body.md
+          echo "_Automated drift detection via [DriftGuard](https://github.com/mwhooo/DriftGuard)_" >> issue-body.md
+      
+      - name: Create GitHub Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const issueBody = fs.readFileSync('issue-body.md', 'utf8');
+            
+            // Check if there's already an open drift issue
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'drift-detected'
+            });
+            
+            if (issues.data.length > 0) {
+              // Update existing issue
+              const issue = issues.data[0];
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `## 🔄 New Drift Detection\n\n${issueBody}`
+              });
+              console.log(`Updated existing issue #${issue.number}`);
+            } else {
+              // Create new issue
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🚨 Configuration Drift Detected - ${new Date().toISOString().split('T')[0]}`,
+                body: issueBody,
+                labels: ['drift-detected', 'automated', 'infrastructure']
+              });
+              console.log(`Created new issue #${issue.data.number}`);
+            }
