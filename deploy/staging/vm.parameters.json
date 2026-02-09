@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "vmName": {
+      "value": "vm-staging-01"
+    },
+    "location": {
+      "value": "southcentralus"
+    },
+    "adminUsername": {
+      "value": "azureuser"
+    },
+    "adminPassword": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/staging-rg/providers/Microsoft.KeyVault/vaults/staging-kv"
+        },
+        "secretName": "vmPassword"
+      }
+    },
+    "vmSize": {
+      "value": "Standard_D2s_v3"
+    },
+    "nicId": {
+      "value": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/staging-rg/providers/Microsoft.Network/networkInterfaces/vm-nic"
+    }
+  }
+}
