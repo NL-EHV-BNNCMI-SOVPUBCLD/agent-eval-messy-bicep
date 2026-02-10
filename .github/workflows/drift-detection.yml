@@ -16,6 +16,8 @@ env:
 jobs:
   detect-drift:
     runs-on: ubuntu-latest
+    outputs:
+      drift-detected: ${{ steps.drift-check.outputs.drift-detected }}
     
     steps:
       - name: Checkout code
@@ -140,7 +142,7 @@ jobs:
   create-issue:
     runs-on: ubuntu-latest
     needs: detect-drift
-    if: failure()
+    if: needs.detect-drift.outputs.drift-detected == '1'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
