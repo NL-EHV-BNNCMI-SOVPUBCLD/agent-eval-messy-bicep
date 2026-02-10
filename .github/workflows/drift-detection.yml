@@ -82,8 +82,11 @@ jobs:
             # Add parameters if specified
             [ -n "$params" ] && DRIFT_CMD="$DRIFT_CMD --parameters-file /workspace/$params"
             
-            # Run and capture JSON
-            $DRIFT_CMD > "drift-reports/${SAFE_NAME}.json" 2>&1 || true
+            # Run and capture output (stderr and stdout separately)
+            $DRIFT_CMD > "drift-reports/${SAFE_NAME}-raw.json" 2>&1 || true
+            
+            # Extract only the JSON portion (between first { and last })
+            sed -n '/{/,/}/p' "drift-reports/${SAFE_NAME}-raw.json" | grep -v '^🔍\|^📄\|^📋\|^🎯\|^🏗️\|^📊\|^🔇\|^⚠️\|^✅\|^📦\|^❌\|^💡' > "drift-reports/${SAFE_NAME}.json" 2>/dev/null || true
             
             # Also get console output
             docker run --rm \
@@ -96,12 +99,13 @@ jobs:
               $([ -n "$params" ] && echo "--parameters-file /workspace/$params") \
               > "drift-reports/${SAFE_NAME}.txt" 2>&1 || true
             
-            # Check drift
+            # Check drift using correct JSON structure
             if [ -f "drift-reports/${SAFE_NAME}.json" ]; then
-              DRIFT_COUNT=$(jq -r '.driftSummary.totalResourcesWithDrift // 0' "drift-reports/${SAFE_NAME}.json" 2>/dev/null || echo "0")
+              HAS_DRIFT=$(jq -r '.HasDrift // false' "drift-reports/${SAFE_NAME}.json" 2>/dev/null || echo "false")
               
-              if [ "$DRIFT_COUNT" -gt 0 ]; then
-                echo "❌ Drift detected: $DRIFT_COUNT resource(s)"
+              if [ "$HAS_DRIFT" = "true" ]; then
+                RESOURCE_COUNT=$(jq -r '.ResourceDrifts | length' "drift-reports/${SAFE_NAME}.json" 2>/dev/null || echo "0")
+                echo "❌ Drift detected: $RESOURCE_COUNT resource(s)"
                 DRIFT_DETECTED=1
               else
                 echo "✅ No drift detected"
@@ -161,24 +165,30 @@ jobs:
           
           # Process each drift report JSON file
           for json_file in drift-reports/*.json; do
+            # Skip raw files
+            [[ "$json_file" == *"-raw.json" ]] && continue
+            
             if [ -f "$json_file" ]; then
               resource_name=$(basename "$json_file" .json | tr '-' ' ' | sed 's/\b\(.\)/\u\1/g')
               txt_file="${json_file%.json}.txt"
               
-              # Parse JSON for summary
-              TOTAL_DRIFT=$(jq -r '.driftSummary.totalResourcesWithDrift // 0' "$json_file" 2>/dev/null || echo "0")
+              # Parse JSON for drift using correct structure
+              HAS_DRIFT=$(jq -r '.HasDrift // false' "$json_file" 2>/dev/null || echo "false")
               
-              if [ "$TOTAL_DRIFT" -gt 0 ]; then
+              if [ "$HAS_DRIFT" = "true" ]; then
                 echo "#### ⚠️ $resource_name" >> issue-body.md
                 echo "" >> issue-body.md
                 
-                # Extract summary from JSON
-                jq -r '.driftSummary | "- **Total Resources with Drift:** \(.totalResourcesWithDrift // 0)\n- **Total Resources Analyzed:** \(.totalResourcesAnalyzed // 0)\n- **Detection Time:** \(.detectionTimestamp // "N/A")"' "$json_file" >> issue-body.md 2>/dev/null || echo "- Could not parse summary" >> issue-body.md
+                # Extract summary from JSON using correct structure
+                DRIFT_COUNT=$(jq -r '.ResourceDrifts | length' "$json_file" 2>/dev/null || echo "0")
+                DETECTED_AT=$(jq -r '.DetectedAt // "N/A"' "$json_file" 2>/dev/null || echo "N/A")
+                echo "- **Total Resources with Drift:** $DRIFT_COUNT" >> issue-body.md
+                echo "- **Detection Time:** $DETECTED_AT" >> issue-body.md
                 echo "" >> issue-body.md
                 
-                # List drifted resources
+                # List drifted resources using correct structure
                 echo "**Drifted Resources:**" >> issue-body.md
-                jq -r '.driftedResources[]? | "- `\(.resourceType)` **\(.resourceName)**\n  - Properties changed: \(.driftedProperties | length)"' "$json_file" >> issue-body.md 2>/dev/null || true
+                jq -r '.ResourceDrifts[]? | "- `\(.ResourceType)` **\(.ResourceName)**\n  - Properties changed: \(.PropertyDrifts | length)"' "$json_file" >> issue-body.md 2>/dev/null || true
                 echo "" >> issue-body.md
                 
                 # Add detailed drift information
