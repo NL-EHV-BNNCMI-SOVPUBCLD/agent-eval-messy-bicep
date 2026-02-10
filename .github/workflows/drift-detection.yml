@@ -85,8 +85,8 @@ jobs:
             # Run and capture output (stderr and stdout separately)
             $DRIFT_CMD > "drift-reports/${SAFE_NAME}-raw.json" 2>&1 || true
             
-            # Extract only the JSON portion (between first { and last })
-            sed -n '/{/,/}/p' "drift-reports/${SAFE_NAME}-raw.json" | grep -v '^🔍\|^📄\|^📋\|^🎯\|^🏗️\|^📊\|^🔇\|^⚠️\|^✅\|^📦\|^❌\|^💡' > "drift-reports/${SAFE_NAME}.json" 2>/dev/null || true
+            # Extract only the JSON portion (from { on its own line to } on its own line)
+            awk '/^{$/,/^}$/' "drift-reports/${SAFE_NAME}-raw.json" > "drift-reports/${SAFE_NAME}.json" 2>/dev/null || true
             
             # Also get console output
             docker run --rm \
