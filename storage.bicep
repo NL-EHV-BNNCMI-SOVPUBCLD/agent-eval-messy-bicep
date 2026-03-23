@@ -10,7 +10,7 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
   }
   kind: 'StorageV2'
   properties: {
-    accessTier: 'Hot'
+    accessTier: 'Cool'
     supportsHttpsTrafficOnly: true
     minimumTlsVersion: 'TLS1_2'
   }
