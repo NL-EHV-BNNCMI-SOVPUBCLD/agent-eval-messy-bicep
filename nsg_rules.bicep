@@ -33,6 +33,20 @@ resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2023-05-0
         }
       }
       {
+        name: 'AllowSSH-Drift'
+        properties: {
+          access: 'Allow'
+          description: 'Drift testing SSH rule'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '22'
+          direction: 'Inbound'
+          priority: 200
+          protocol: 'Tcp'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+        }
+      }
+      {
         name: 'DenyAllInbound'
         properties: {
           priority: 4096
