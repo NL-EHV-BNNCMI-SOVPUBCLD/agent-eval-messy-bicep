@@ -12,7 +12,7 @@ resource sqlServer 'Microsoft.Sql/servers@2023-05-01-preview' = {
     administratorLogin: administratorLogin
     administratorLoginPassword: administratorLoginPassword
     version: '12.0'
-    minimalTlsVersion: '1.2'
+    minimalTlsVersion: '1.1'
     publicNetworkAccess: 'Enabled'
   }
 }
