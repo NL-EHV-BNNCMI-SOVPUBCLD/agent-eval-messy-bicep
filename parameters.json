@@ -22,6 +22,12 @@
           "addressPrefix": "10.1.2.0/24"
         }
       ]
+    },
+    "tags": {
+      "value": {
+        "Environment": "Drift",
+        "NetworkType": "Modified"
+      }
     }
   }
 }
