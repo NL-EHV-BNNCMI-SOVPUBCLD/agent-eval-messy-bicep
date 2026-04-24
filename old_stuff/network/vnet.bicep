@@ -9,9 +9,12 @@ param subnets array = [
   }
 ]
 
+param tags object = {}
+
 resource virtualNetwork 'Microsoft.Network/virtualNetworks@2023-05-01' = {
   name: vnetName
   location: location
+  tags: tags
   properties: {
     addressSpace: {
       addressPrefixes: [
