@@ -8,8 +8,9 @@ resource applicationInsights 'Microsoft.Insights/components@2020-02-02' = {
   kind: 'web'
   properties: {
     Application_Type: 'web'
-    WorkspaceResourceId: workspaceId
+    DisableLocalAuth: false
     IngestionMode: 'LogAnalytics'
+    WorkspaceResourceId: workspaceId
     publicNetworkAccessForIngestion: 'Enabled'
     publicNetworkAccessForQuery: 'Enabled'
   }
