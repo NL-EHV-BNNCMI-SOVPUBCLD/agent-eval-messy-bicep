@@ -12,6 +12,10 @@ param subnets array = [
 resource virtualNetwork 'Microsoft.Network/virtualNetworks@2023-05-01' = {
   name: vnetName
   location: location
+  tags: {
+    Environment: 'Drift'
+    NetworkType: 'Modified'
+  }
   properties: {
     addressSpace: {
       addressPrefixes: [
