@@ -25,6 +25,10 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2023-05-01' = {
       }
     }]
   }
+  tags: {
+    Environment: 'Drift'
+    NetworkType: 'Modified'
+  }
 }
 
 output vnetId string = virtualNetwork.id
